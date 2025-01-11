@@ -21,7 +21,7 @@ struct Args {
 struct Editor {
     text: Rope,
     stdout: Stdout,
-    cursor_prev: (u16, u16),
+    cursor_pos: (u16, u16),
 }
 
 impl Editor {
@@ -45,7 +45,7 @@ impl Editor {
         Ok(Self {
             stdout,
             text,
-            cursor_prev: (0, 0),
+            cursor_pos: (0, 0),
         })
     }
 
@@ -62,7 +62,7 @@ impl Editor {
 
         execute!(
             self.stdout,
-            cursor::MoveTo(self.cursor_prev.0, self.cursor_prev.1)
+            cursor::MoveTo(self.cursor_pos.0, self.cursor_pos.1)
         )?;
 
         self.stdout.flush()?;
@@ -82,6 +82,7 @@ impl Editor {
         for (i, line) in self.text.lines().enumerate() {
             if i == pos.1.into() {
                 count += pos.0 as usize;
+                break;
             } else {
                 count += line.len_chars();
             }
@@ -100,11 +101,14 @@ impl Editor {
                 }
 
                 if event.code == KeyCode::Enter {
-                    self.text.insert(self.get_cursor_index()?, "\n");
+                    self.text.insert(self.get_cursor_index()?, "\n\r");
+                    self.cursor_pos.0 = 0;
+                    self.cursor_pos.1 += 1;
                 }
 
                 if let KeyCode::Char(c) = event.code {
                     self.text.insert_char(self.get_cursor_index()?, c);
+                    self.cursor_pos.0 += 1;
                 }
             }
             _ => {}
