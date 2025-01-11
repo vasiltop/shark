@@ -4,13 +4,15 @@ use std::{
 };
 
 use clap::Parser;
+
 use crossterm::{
-    cursor::{self, MoveDown, MoveLeft, MoveRight, MoveUp},
-    event::{read, Event, KeyCode, KeyEvent, KeyEventKind},
+    cursor,
+    event::{read, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute, queue,
     style::Print,
     terminal,
 };
+
 use ropey::Rope;
 
 #[derive(Parser, Debug)]
@@ -22,10 +24,11 @@ struct Editor {
     text: Rope,
     stdout: Stdout,
     cursor_pos: (u16, u16),
+    filename: String,
 }
 
 impl Editor {
-    fn new(mut stdout: Stdout, mut text: Rope) -> std::io::Result<Self> {
+    fn new(mut stdout: Stdout, mut text: Rope, filename: String) -> std::io::Result<Self> {
         execute!(stdout, terminal::EnterAlternateScreen)?;
         terminal::enable_raw_mode()?;
 
@@ -46,6 +49,7 @@ impl Editor {
             stdout,
             text,
             cursor_pos: (0, 0),
+            filename,
         })
     }
 
@@ -91,6 +95,22 @@ impl Editor {
         Ok(count)
     }
 
+    fn save(&mut self) {
+        let s: String = self
+            .text
+            .to_string()
+            .chars()
+            .filter(|c| *c != '\r')
+            .collect::<Vec<_>>()
+            .into_iter()
+            .collect();
+
+        File::create(&self.filename)
+            .unwrap()
+            .write_all(s.as_bytes())
+            .unwrap();
+    }
+
     fn handle_events(&mut self) -> std::io::Result<bool> {
         let event = read()?;
 
@@ -104,11 +124,6 @@ impl Editor {
                     self.text.insert(self.get_cursor_index()?, "\r\n");
                     self.cursor_pos.0 = 0;
                     self.cursor_pos.1 += 1;
-                }
-
-                if let KeyCode::Char(c) = event.code {
-                    self.text.insert_char(self.get_cursor_index()?, c);
-                    self.cursor_pos.0 += 1;
                 }
 
                 if event.code == KeyCode::Up {
@@ -129,7 +144,20 @@ impl Editor {
 
                 if event.code == KeyCode::Delete {
                     let idx = self.get_cursor_index()?;
-                    self.text.remove(0..5);
+                    self.text.remove(idx..idx + 1);
+                }
+
+                if event.code == KeyCode::Backspace {
+                    let idx = self.get_cursor_index()?;
+                    self.text.remove(idx - 1..idx);
+                    self.cursor_pos.0 -= 1;
+                }
+
+                if event.code == KeyCode::Char('s') && event.modifiers == KeyModifiers::CONTROL {
+                    self.save();
+                } else if let KeyCode::Char(c) = event.code {
+                    self.text.insert_char(self.get_cursor_index()?, c);
+                    self.cursor_pos.0 += 1;
                 }
             }
             _ => {}
@@ -141,9 +169,11 @@ impl Editor {
 fn main() -> std::io::Result<()> {
     let stdout = io::stdout();
     let args = Args::parse();
-    let text = Rope::from_reader(File::open(args.filename)?)?;
 
-    let mut editor = Editor::new(stdout, text)?;
+    let file = File::open(&args.filename)?;
+    let text = Rope::from_reader(&file)?;
+
+    let mut editor = Editor::new(stdout, text, args.filename)?;
     editor.update_display()?;
 
     loop {
