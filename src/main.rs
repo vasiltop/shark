@@ -21,6 +21,7 @@ struct Args {
 struct Editor {
     text: Rope,
     stdout: Stdout,
+    cursor_prev: (u16, u16),
 }
 
 impl Editor {
@@ -28,22 +29,20 @@ impl Editor {
         execute!(stdout, terminal::EnterAlternateScreen)?;
         terminal::enable_raw_mode()?;
 
-        Ok(Self { stdout, text })
+        Ok(Self { stdout, text, cursor_prev: (0, 0) })
     }
 
     fn update_display(&mut self) -> std::io::Result<()> {
         execute!(
             self.stdout,
             terminal::Clear(terminal::ClearType::All),
-            cursor::MoveTo(0, 0)
+            cursor::MoveTo(0, 0),
         )?;
-
         for line in self.text.lines() {
             queue!(self.stdout, style::Print(line), style::Print("\r"))?;
         }
-
         self.stdout.flush()?;
-
+        execute!(self.stdout, cursor::MoveTo(self.cursor_prev.0, self.cursor_prev.1))?;
         Ok(())
     }
 
@@ -58,8 +57,8 @@ impl Editor {
 
         let mut count = 0;
         for (i, line) in self.text.lines().enumerate() {
-            if i == pos.0.into() {
-                count += pos.1 as usize;
+            if i == pos.1.into() {
+                count += pos.0 as usize;
             } else {
                 count += line.len_chars();
             }
@@ -78,7 +77,7 @@ impl Editor {
                 }
 
                 if event.code == KeyCode::Enter {
-                    self.text.insert(self.get_cursor_index()?, "\n\r");
+                    self.text.insert(self.get_cursor_index()?, "\n");
                 }
 
                 if let KeyCode::Char(c) = event.code {
@@ -87,7 +86,7 @@ impl Editor {
             }
             _ => {}
         };
-
+        self.cursor_prev = cursor::position()?;
         Ok(true)
     }
 }
