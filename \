@@ -24,43 +24,40 @@ struct Editor {
 }
 
 impl Editor {
-    fn new(mut stdout: Stdout, text: Rope) -> std::io::Result<Self> {
-        execute!(stdout, terminal::EnterAlternateScreen)?;
-        terminal::enable_raw_mode()?;
-
-        Ok(Self { stdout, text })
+    fn new(stdout: Stdout, text: Rope) -> Self {
+        Self { stdout, text }
     }
 
-    fn update_display(&mut self) -> std::io::Result<()> {
+    fn update_display(&self, stdout: &mut Stdout, rope: Rope) -> std::io::Result<()> {
         execute!(
-            self.stdout,
+            stdout,
             terminal::Clear(terminal::ClearType::All),
             cursor::MoveTo(0, 0)
         )?;
 
-        for line in self.text.lines() {
-            queue!(self.stdout, Print(line))?;
+        for line in rope.lines() {
+            queue!(stdout, Print(line))?;
         }
 
-        self.stdout.flush()?;
+        stdout.flush()?;
 
-        Ok(())
-    }
-
-    fn close(&mut self) -> std::io::Result<()> {
-        execute!(self.stdout, terminal::LeaveAlternateScreen)?;
-        terminal::disable_raw_mode()?;
         Ok(())
     }
 }
 
 fn main() -> std::io::Result<()> {
-    let stdout = io::stdout();
+    let mut stdout = io::stdout();
+
     let args = Args::parse();
+
     let text = Rope::from_reader(File::open(args.filename)?)?;
 
-    let mut editor = Editor::new(stdout, text)?;
-    editor.update_display()?;
+    execute!(stdout, terminal::EnterAlternateScreen)?;
+    terminal::enable_raw_mode()?;
+
+    let editor = Editor::new(stdout, text);
+
+    editor.update_display(&mut stdout, text)?;
 
     loop {
         let event = read()?;
@@ -75,7 +72,7 @@ fn main() -> std::io::Result<()> {
         }
     }
 
-    editor.close()?;
-
+    execute!(stdout, terminal::LeaveAlternateScreen)?;
+    terminal::disable_raw_mode()?;
     Ok(())
 }
