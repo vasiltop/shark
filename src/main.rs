@@ -5,10 +5,10 @@ use std::{
 
 use clap::Parser;
 use crossterm::{
-    cursor,
+    cursor::{self, MoveDown, MoveLeft, MoveRight, MoveUp},
     event::{read, Event, KeyCode, KeyEvent, KeyEventKind},
     execute, queue,
-    style::{self, Print},
+    style::Print,
     terminal,
 };
 use ropey::Rope;
@@ -33,7 +33,7 @@ impl Editor {
 
         for (i, c) in text.chars().enumerate() {
             if c == '\n' {
-                indices.push(i + 1);
+                indices.push(i);
             }
         }
 
@@ -57,7 +57,7 @@ impl Editor {
         )?;
 
         for line in self.text.lines() {
-            queue!(self.stdout, style::Print(line))?;
+            queue!(self.stdout, Print(line))?;
         }
 
         execute!(
@@ -101,7 +101,7 @@ impl Editor {
                 }
 
                 if event.code == KeyCode::Enter {
-                    self.text.insert(self.get_cursor_index()?, "\n\r");
+                    self.text.insert(self.get_cursor_index()?, "\r\n");
                     self.cursor_pos.0 = 0;
                     self.cursor_pos.1 += 1;
                 }
@@ -109,6 +109,27 @@ impl Editor {
                 if let KeyCode::Char(c) = event.code {
                     self.text.insert_char(self.get_cursor_index()?, c);
                     self.cursor_pos.0 += 1;
+                }
+
+                if event.code == KeyCode::Up {
+                    self.cursor_pos.1 -= 1;
+                }
+
+                if event.code == KeyCode::Down {
+                    self.cursor_pos.1 += 1;
+                }
+
+                if event.code == KeyCode::Right {
+                    self.cursor_pos.0 += 1;
+                }
+
+                if event.code == KeyCode::Left {
+                    self.cursor_pos.0 -= 1;
+                }
+
+                if event.code == KeyCode::Delete {
+                    let idx = self.get_cursor_index()?;
+                    self.text.remove(0..5);
                 }
             }
             _ => {}
