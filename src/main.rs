@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{self, Stdout, Write},
+    io::{self, BufWriter, Stdout, Write},
 };
 
 use clap::Parser;
@@ -96,19 +96,14 @@ impl Editor {
     }
 
     fn save(&mut self) {
-        let s: String = self
-            .text
-            .to_string()
-            .chars()
-            .filter(|c| *c != '\r')
-            .collect::<Vec<_>>()
-            .into_iter()
-            .collect();
+        let mut file = BufWriter::new(File::create(&self.filename).unwrap());
+        let bytes = self.text.bytes().filter(|c| *c != b'\r');
 
-        File::create(&self.filename)
-            .unwrap()
-            .write_all(s.as_bytes())
-            .unwrap();
+        for b in bytes {
+            file.write_all(&[b]).unwrap();
+        }
+
+        file.flush().unwrap();
     }
 
     fn handle_events(&mut self) -> std::io::Result<bool> {
