@@ -25,11 +25,28 @@ struct Editor {
 }
 
 impl Editor {
-    fn new(mut stdout: Stdout, text: Rope) -> std::io::Result<Self> {
+    fn new(mut stdout: Stdout, mut text: Rope) -> std::io::Result<Self> {
         execute!(stdout, terminal::EnterAlternateScreen)?;
         terminal::enable_raw_mode()?;
 
-        Ok(Self { stdout, text, cursor_prev: (0, 0) })
+        let mut indices = Vec::new();
+
+        for (i, c) in text.chars().enumerate() {
+            if c == '\n' {
+                indices.push(i + 1);
+            }
+        }
+
+        for (ref mut offset, i) in indices.into_iter().enumerate() {
+            text.insert_char(i + *offset, '\r');
+            *offset += 1;
+        }
+
+        Ok(Self {
+            stdout,
+            text,
+            cursor_prev: (0, 0),
+        })
     }
 
     fn update_display(&mut self) -> std::io::Result<()> {
@@ -38,11 +55,17 @@ impl Editor {
             terminal::Clear(terminal::ClearType::All),
             cursor::MoveTo(0, 0),
         )?;
+
         for line in self.text.lines() {
-            queue!(self.stdout, style::Print(line), style::Print("\r"))?;
+            queue!(self.stdout, style::Print(line))?;
         }
+
+        execute!(
+            self.stdout,
+            cursor::MoveTo(self.cursor_prev.0, self.cursor_prev.1)
+        )?;
+
         self.stdout.flush()?;
-        execute!(self.stdout, cursor::MoveTo(self.cursor_prev.0, self.cursor_prev.1))?;
         Ok(())
     }
 
@@ -86,7 +109,6 @@ impl Editor {
             }
             _ => {}
         };
-        self.cursor_prev = cursor::position()?;
         Ok(true)
     }
 }
