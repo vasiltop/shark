@@ -1,5 +1,4 @@
 use std::{
-    any::Any,
     cmp,
     fs::File,
     io::{self, BufWriter, Stdout, Write},
@@ -8,15 +7,30 @@ use std::{
 use crossterm::{
     cursor,
     event::{read, Event, KeyCode, KeyEventKind, KeyModifiers},
-    execute, queue, style,
-    style::{Color::*, Print},
-    terminal,
+    execute, queue,
+    style::{self, Color::*, Print},
+    terminal::{self, ClearType},
 };
 
 use ropey::Rope;
 
 use clap::Parser;
-use tree_sitter::Node;
+use tree_sitter::{Node, Tree};
+
+const COLORS: [style::Color; 12] = [
+    Red,
+    DarkRed,
+    Green,
+    DarkGreen,
+    Yellow,
+    DarkYellow,
+    Blue,
+    DarkBlue,
+    Magenta,
+    DarkMagenta,
+    Cyan,
+    DarkCyan,
+];
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -63,43 +77,51 @@ impl Editor {
         })
     }
 
-    fn update_display(&mut self) -> std::io::Result<()> {
-        const COLORS: [style::Color; 12] = [
-            Red,
-            DarkRed,
-            Green,
-            DarkGreen,
-            Yellow,
-            DarkYellow,
-            Blue,
-            DarkBlue,
-            Magenta,
-            DarkMagenta,
-            Cyan,
-            DarkCyan,
-        ];
+    fn draw_node(&mut self, node: Node) -> std::io::Result<usize> {
+        let index = self.get_index_from_pos((
+            node.start_position().column as u16,
+            node.start_position().row as u16,
+        ))?;
 
-        execute!(
+        let diff = node.end_position().column - node.start_position().column;
+        let end = index + diff;
+
+        queue!(
             self.stdout,
-            terminal::Clear(terminal::ClearType::All),
-            cursor::MoveTo(0, 0),
+            style::SetForegroundColor(COLORS[(node.kind_id() % 12) as usize]),
+            Print(self.text.slice(index..end).to_string())
         )?;
 
+        Ok(end)
+    }
+
+    fn get_tree(&self) -> Option<Tree> {
         let mut parser = tree_sitter::Parser::new();
 
         parser
             .set_language(&tree_sitter_rust::LANGUAGE.into())
             .unwrap();
 
-        let tree = parser.parse(self.text.to_string(), None);
+        let tree = parser.parse(self.text.to_string(), None).unwrap();
 
-        let mut nodes = Vec::new();
+        Some(tree)
+    }
 
+    fn redraw(&mut self) -> std::io::Result<()> {
+        execute!(
+            self.stdout,
+            cursor::EnableBlinking,
+            cursor::SetCursorStyle::BlinkingBar,
+            cursor::Hide,
+            cursor::MoveTo(0, 0),
+        )?;
+
+        let tree = self.get_tree();
         if let Some(tree) = tree {
+            let mut nodes = Vec::new();
             nodes.append(&mut Self::expand_nodes(tree.root_node()));
 
             let mut prev_end = 0;
-
             for node in nodes {
                 let index = self.get_index_from_pos((
                     node.start_position().column as u16,
@@ -114,21 +136,14 @@ impl Editor {
                     )?;
                 }
 
-                let diff = node.end_position().column - node.start_position().column;
-                let end = index + diff;
-                prev_end = end;
-
-                queue!(
-                    self.stdout,
-                    style::SetForegroundColor(COLORS[(node.kind_id() % 12) as usize]),
-                    Print(self.text.slice(index..end).to_string())
-                )?;
+                prev_end = self.draw_node(node)?;
             }
         }
 
         execute!(
             self.stdout,
-            cursor::MoveTo(self.cursor_pos.0, self.cursor_pos.1)
+            cursor::MoveTo(self.cursor_pos.0, self.cursor_pos.1),
+            cursor::Show,
         )?;
 
         self.stdout.flush()?;
@@ -193,7 +208,7 @@ impl Editor {
         0
     }
 
-    fn attempt_cursor_move(&mut self, movement: CursorMovement) {
+    fn attempt_cursor_move(&mut self, movement: CursorMovement) -> std::io::Result<()> {
         match movement {
             CursorMovement::Up => self.cursor_pos.1 = self.cursor_pos.1.saturating_sub(1),
             CursorMovement::Down => {
@@ -208,6 +223,8 @@ impl Editor {
             }
             CursorMovement::Left => self.cursor_pos.0 = self.cursor_pos.0.saturating_sub(1),
         }
+
+        Ok(())
     }
 
     fn handle_events(&mut self) -> std::io::Result<bool> {
@@ -221,25 +238,33 @@ impl Editor {
                         .insert(self.get_index_from_pos(cursor::position()?)?, "\r\n");
                     self.cursor_pos.0 = 0;
                     self.cursor_pos.1 += 1;
+                    execute!(self.stdout, terminal::Clear(terminal::ClearType::All),)?;
+                    self.redraw()?;
                 }
-                KeyCode::Up => self.attempt_cursor_move(CursorMovement::Up),
-                KeyCode::Down => self.attempt_cursor_move(CursorMovement::Down),
-                KeyCode::Left => self.attempt_cursor_move(CursorMovement::Left),
-                KeyCode::Right => self.attempt_cursor_move(CursorMovement::Right),
+                KeyCode::Up => self.attempt_cursor_move(CursorMovement::Up)?,
+                KeyCode::Down => self.attempt_cursor_move(CursorMovement::Down)?,
+                KeyCode::Left => self.attempt_cursor_move(CursorMovement::Left)?,
+                KeyCode::Right => self.attempt_cursor_move(CursorMovement::Right)?,
                 KeyCode::Backspace => {
                     if self.cursor_pos != (0, 0) {
                         let idx = self.get_index_from_pos(cursor::position()?)?;
                         if self.cursor_pos.0 > 0 {
                             self.text.remove(idx - 1..idx);
-                            self.attempt_cursor_move(CursorMovement::Left)
+                            self.attempt_cursor_move(CursorMovement::Left)?;
+                            execute!(self.stdout, terminal::Clear(terminal::ClearType::All),)?;
+                            self.redraw()?;
                         } else if self.get_current_line_length() == 0 {
                             self.text.remove(idx..idx + 2);
-                            self.attempt_cursor_move(CursorMovement::Up);
+                            self.attempt_cursor_move(CursorMovement::Up)?;
                             self.cursor_pos.0 = self.get_current_line_length() as u16;
+                            execute!(self.stdout, terminal::Clear(terminal::ClearType::All),)?;
+                            self.redraw()?;
                         } else {
-                            self.attempt_cursor_move(CursorMovement::Up);
+                            self.attempt_cursor_move(CursorMovement::Up)?;
                             self.cursor_pos.0 = self.get_current_line_length() as u16;
                             self.text.remove(idx - 2..idx);
+                            execute!(self.stdout, terminal::Clear(terminal::ClearType::All),)?;
+                            self.redraw()?;
                         }
                     }
                 }
@@ -250,6 +275,7 @@ impl Editor {
                         self.text
                             .insert_char(self.get_index_from_pos(cursor::position()?)?, c);
                         self.cursor_pos.0 += 1;
+                        self.redraw()?;
                     }
                 }
                 _ => {}
@@ -258,6 +284,12 @@ impl Editor {
         };
 
         self.cursor_pos.0 = cmp::min(self.cursor_pos.0, self.get_current_line_length() as u16);
+
+        execute!(
+            self.stdout,
+            cursor::MoveTo(self.cursor_pos.0, self.cursor_pos.1)
+        )?;
+
         Ok(true)
     }
 }
@@ -270,14 +302,12 @@ fn main() -> std::io::Result<()> {
     let text = Rope::from_reader(&file)?;
 
     let mut editor = Editor::new(stdout, text, args.filename)?;
-    editor.update_display()?;
+    editor.redraw()?;
 
     loop {
         if !editor.handle_events()? {
             break;
         }
-
-        editor.update_display()?;
     }
 
     editor.close()?;
