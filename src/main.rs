@@ -1,21 +1,21 @@
-use core::panic;
 use std::{
     cmp,
     fs::File,
     io::{self, BufWriter, Stdout, Write},
 };
 
-use clap::Parser;
-
 use crossterm::{
     cursor,
     event::{read, Event, KeyCode, KeyEventKind, KeyModifiers},
-    execute, queue,
+    execute, queue, style,
     style::Print,
     terminal,
 };
 
 use ropey::Rope;
+
+use clap::Parser;
+use tree_sitter::Node;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -66,11 +66,43 @@ impl Editor {
         execute!(
             self.stdout,
             terminal::Clear(terminal::ClearType::All),
+            //style::SetForegroundColor(style::Color::Blue),
+            style::Color::Blue,
             cursor::MoveTo(0, 0),
         )?;
 
-        for line in self.text.lines() {
-            queue!(self.stdout, Print(line))?;
+        let mut parser = tree_sitter::Parser::new();
+
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
+
+        let tree = parser.parse(self.text.to_string(), None);
+
+        let mut nodes = Vec::new();
+
+        if let Some(tree) = tree {
+            nodes.append(&mut Self::expand_nodes(tree.root_node()));
+
+            let mut prev_end = 0;
+
+            for node in nodes {
+                let index = self.get_index_from_pos((
+                    node.start_position().column as u16,
+                    node.start_position().row as u16,
+                ))?;
+
+                if index > prev_end {
+                    queue!(self.stdout, Print(self.text.slice(prev_end..index)))?;
+                }
+
+                let diff = node.end_position().column - node.start_position().column;
+                let end = index + diff;
+                prev_end = end;
+
+                queue!(self.stdout, Print(self.text.slice(index..end).to_string()))?;
+            }
+            // queue!(self.stdout, Print(format!("{:?}", nodes)));
         }
 
         execute!(
@@ -82,15 +114,30 @@ impl Editor {
         Ok(())
     }
 
+    fn expand_nodes(node: Node) -> Vec<Node> {
+        let mut nodes = Vec::new();
+
+        if node.child_count() == 0 {
+            nodes.push(node);
+        }
+
+        for n in node.children(&mut node.walk()) {
+            let children = Self::expand_nodes(n);
+            for child in children {
+                nodes.push(child);
+            }
+        }
+
+        nodes
+    }
+
     fn close(&mut self) -> std::io::Result<()> {
         execute!(self.stdout, terminal::LeaveAlternateScreen)?;
         terminal::disable_raw_mode()?;
         Ok(())
     }
 
-    fn get_cursor_index(&self) -> std::io::Result<usize> {
-        let pos = cursor::position()?;
-
+    fn get_index_from_pos(&self, pos: (u16, u16)) -> std::io::Result<usize> {
         let mut count = 0;
         for (i, line) in self.text.lines().enumerate() {
             if i == pos.1.into() {
@@ -149,7 +196,8 @@ impl Editor {
             Event::Key(event) if event.kind == KeyEventKind::Press => match event.code {
                 KeyCode::Esc => return Ok(false),
                 KeyCode::Enter => {
-                    self.text.insert(self.get_cursor_index()?, "\r\n");
+                    self.text
+                        .insert(self.get_index_from_pos(cursor::position()?)?, "\r\n");
                     self.cursor_pos.0 = 0;
                     self.cursor_pos.1 += 1;
                 }
@@ -157,13 +205,9 @@ impl Editor {
                 KeyCode::Down => self.attempt_cursor_move(CursorMovement::Down),
                 KeyCode::Left => self.attempt_cursor_move(CursorMovement::Left),
                 KeyCode::Right => self.attempt_cursor_move(CursorMovement::Right),
-                KeyCode::Delete => {
-                    let idx = self.get_cursor_index()?;
-                    self.text.remove(idx..idx + 1);
-                }
                 KeyCode::Backspace => {
                     if self.cursor_pos != (0, 0) {
-                        let idx = self.get_cursor_index()?;
+                        let idx = self.get_index_from_pos(cursor::position()?)?;
                         if self.cursor_pos.0 > 0 {
                             self.text.remove(idx - 1..idx);
                             self.attempt_cursor_move(CursorMovement::Left)
@@ -182,7 +226,8 @@ impl Editor {
                     if c == 's' && event.modifiers == KeyModifiers::CONTROL {
                         self.save();
                     } else {
-                        self.text.insert_char(self.get_cursor_index()?, c);
+                        self.text
+                            .insert_char(self.get_index_from_pos(cursor::position()?)?, c);
                         self.cursor_pos.0 += 1;
                     }
                 }
