@@ -1,4 +1,5 @@
 use std::{
+    any::Any,
     cmp,
     fs::File,
     io::{self, BufWriter, Stdout, Write},
@@ -8,7 +9,7 @@ use crossterm::{
     cursor,
     event::{read, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute, queue, style,
-    style::Print,
+    style::{Color::*, Print},
     terminal,
 };
 
@@ -63,11 +64,24 @@ impl Editor {
     }
 
     fn update_display(&mut self) -> std::io::Result<()> {
+        const COLORS: [style::Color; 12] = [
+            Red,
+            DarkRed,
+            Green,
+            DarkGreen,
+            Yellow,
+            DarkYellow,
+            Blue,
+            DarkBlue,
+            Magenta,
+            DarkMagenta,
+            Cyan,
+            DarkCyan,
+        ];
+
         execute!(
             self.stdout,
             terminal::Clear(terminal::ClearType::All),
-            //style::SetForegroundColor(style::Color::Blue),
-            style::Color::Blue,
             cursor::MoveTo(0, 0),
         )?;
 
@@ -93,16 +107,23 @@ impl Editor {
                 ))?;
 
                 if index > prev_end {
-                    queue!(self.stdout, Print(self.text.slice(prev_end..index)))?;
+                    queue!(
+                        self.stdout,
+                        style::SetForegroundColor(style::Color::White),
+                        Print(self.text.slice(prev_end..index))
+                    )?;
                 }
 
                 let diff = node.end_position().column - node.start_position().column;
                 let end = index + diff;
                 prev_end = end;
 
-                queue!(self.stdout, Print(self.text.slice(index..end).to_string()))?;
+                queue!(
+                    self.stdout,
+                    style::SetForegroundColor(COLORS[(node.kind_id() % 12) as usize]),
+                    Print(self.text.slice(index..end).to_string())
+                )?;
             }
-            // queue!(self.stdout, Print(format!("{:?}", nodes)));
         }
 
         execute!(
