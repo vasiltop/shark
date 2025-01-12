@@ -1,4 +1,5 @@
 use std::{
+    cmp,
     fs::File,
     io::{self, BufWriter, Stdout, Write},
 };
@@ -18,6 +19,13 @@ use ropey::Rope;
 #[derive(Parser, Debug)]
 struct Args {
     filename: String,
+}
+
+enum CursorMovement {
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
 struct Editor {
@@ -106,57 +114,71 @@ impl Editor {
         file.flush().unwrap();
     }
 
+    fn get_current_line_length(&self) -> usize {
+        for (i, line) in self.text.lines().enumerate() {
+            if i == self.cursor_pos.1.into() {
+                return line.len_chars().saturating_sub(2);
+            }
+        }
+
+        0
+    }
+
+    fn attempt_cursor_move(&mut self, movement: CursorMovement) {
+        match movement {
+            CursorMovement::Up => self.cursor_pos.1 = self.cursor_pos.1.saturating_sub(1),
+            CursorMovement::Down => {
+                if self.cursor_pos.1 < (self.text.lines().len() - 2) as u16 {
+                    self.cursor_pos.1 += 1;
+                }
+            }
+            CursorMovement::Right => {
+                if self.cursor_pos.0 < self.get_current_line_length() as u16 {
+                    self.cursor_pos.0 += 1;
+                }
+            }
+            CursorMovement::Left => self.cursor_pos.0 = self.cursor_pos.0.saturating_sub(1),
+        }
+    }
+
     fn handle_events(&mut self) -> std::io::Result<bool> {
         let event = read()?;
 
         match event {
-            Event::Key(event) if event.kind == KeyEventKind::Press => {
-                if event.code == KeyCode::Esc {
-                    return Ok(false);
-                }
-
-                if event.code == KeyCode::Enter {
+            Event::Key(event) if event.kind == KeyEventKind::Press => match event.code {
+                KeyCode::Esc => return Ok(false),
+                KeyCode::Enter => {
                     self.text.insert(self.get_cursor_index()?, "\r\n");
                     self.cursor_pos.0 = 0;
                     self.cursor_pos.1 += 1;
                 }
-
-                if event.code == KeyCode::Up {
-                    self.cursor_pos.1 -= 1;
-                }
-
-                if event.code == KeyCode::Down {
-                    self.cursor_pos.1 += 1;
-                }
-
-                if event.code == KeyCode::Right {
-                    self.cursor_pos.0 += 1;
-                }
-
-                if event.code == KeyCode::Left {
-                    self.cursor_pos.0 -= 1;
-                }
-
-                if event.code == KeyCode::Delete {
+                KeyCode::Up => self.attempt_cursor_move(CursorMovement::Up),
+                KeyCode::Down => self.attempt_cursor_move(CursorMovement::Down),
+                KeyCode::Left => self.attempt_cursor_move(CursorMovement::Left),
+                KeyCode::Right => self.attempt_cursor_move(CursorMovement::Right),
+                KeyCode::Delete => {
                     let idx = self.get_cursor_index()?;
                     self.text.remove(idx..idx + 1);
                 }
-
-                if event.code == KeyCode::Backspace {
+                KeyCode::Backspace => {
                     let idx = self.get_cursor_index()?;
                     self.text.remove(idx - 1..idx);
                     self.cursor_pos.0 -= 1;
                 }
-
-                if event.code == KeyCode::Char('s') && event.modifiers == KeyModifiers::CONTROL {
-                    self.save();
-                } else if let KeyCode::Char(c) = event.code {
-                    self.text.insert_char(self.get_cursor_index()?, c);
-                    self.cursor_pos.0 += 1;
+                KeyCode::Char(c) => {
+                    if c == 's' && event.modifiers == KeyModifiers::CONTROL {
+                        self.save();
+                    } else {
+                        self.text.insert_char(self.get_cursor_index()?, c);
+                        self.cursor_pos.0 += 1;
+                    }
                 }
-            }
+                _ => {}
+            },
             _ => {}
         };
+
+        self.cursor_pos.0 = cmp::min(self.cursor_pos.0, self.get_current_line_length() as u16);
         Ok(true)
     }
 }
