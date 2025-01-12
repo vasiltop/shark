@@ -1,3 +1,4 @@
+use core::panic;
 use std::{
     cmp,
     fs::File,
@@ -161,9 +162,21 @@ impl Editor {
                     self.text.remove(idx..idx + 1);
                 }
                 KeyCode::Backspace => {
-                    let idx = self.get_cursor_index()?;
-                    self.text.remove(idx - 1..idx);
-                    self.cursor_pos.0 -= 1;
+                    if self.cursor_pos != (0, 0) {
+                        let idx = self.get_cursor_index()?;
+                        if self.cursor_pos.0 > 0 {
+                            self.text.remove(idx - 1..idx);
+                            self.attempt_cursor_move(CursorMovement::Left)
+                        } else if self.get_current_line_length() == 0 {
+                            self.text.remove(idx..idx + 2);
+                            self.attempt_cursor_move(CursorMovement::Up);
+                            self.cursor_pos.0 = self.get_current_line_length() as u16;
+                        } else {
+                            self.attempt_cursor_move(CursorMovement::Up);
+                            self.cursor_pos.0 = self.get_current_line_length() as u16;
+                            self.text.remove(idx - 2..idx);
+                        }
+                    }
                 }
                 KeyCode::Char(c) => {
                     if c == 's' && event.modifiers == KeyModifiers::CONTROL {
