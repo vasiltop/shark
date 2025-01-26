@@ -13,14 +13,14 @@ struct Args {
 fn main() -> std::io::Result<()> {
     let stdout = io::stdout();
     let args = Args::parse();
+    /*
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(File::options().write(true).open("latest.log").unwrap())
+            .with_ansi(false)
+            .finish();
 
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(File::options().write(true).open("latest.log").unwrap())
-        .with_ansi(false)
-        .finish();
-
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
-
+        tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    */
     let file = File::open(&args.filename).unwrap();
     let rope = Rope::from_reader(&file).unwrap();
 

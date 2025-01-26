@@ -11,7 +11,6 @@ use crossterm::{
     terminal::{self, ClearType},
 };
 use ropey::Rope;
-use tracing::info;
 use tree_sitter::Node;
 
 pub struct Editor {
@@ -134,7 +133,6 @@ impl Editor {
                             self.scroll -= 1;
                         }
 
-                        self.redraw()?;
                         self.rope.remove(idx..idx + 2);
                         self.attempt_cursor_move(CursorMovement::Up)?;
                         let line_length = self.get_current_line_len()?;
@@ -144,7 +142,6 @@ impl Editor {
                             self.scroll -= 1;
                         }
 
-                        self.redraw()?;
                         self.attempt_cursor_move(CursorMovement::Up)?;
                         let line_length = self.get_current_line_len()?;
                         execute!(self.stdout, cursor::MoveToColumn(line_length as u16))?;
@@ -197,9 +194,9 @@ impl Editor {
         execute!(
             self.stdout,
             cursor::Hide,
+            terminal::Clear(ClearType::All),
             cursor::SavePosition,
             cursor::MoveTo(0, 0),
-            terminal::Clear(ClearType::All)
         )?;
         let mut parser = tree_sitter::Parser::new();
 
